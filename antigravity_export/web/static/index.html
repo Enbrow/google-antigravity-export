@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Antigravity Export</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/static/styles.css" />
+<script defer src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+<script defer src="/static/app.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">
+      <svg width="22" height="22" viewBox="0 0 112 112" fill="none">
+        <path d="M89.6992 93.695C94.3659 97.195 101.366 94.8617 94.9492 88.445C75.6992 69.7783 79.7825 18.445 55.8659 18.445C31.9492 18.445 36.0325 69.7783 16.7825 88.445C9.78251 95.445 17.3658 97.195 22.0325 93.695C40.1159 81.445 38.9492 59.8617 55.8659 59.8617C72.7825 59.8617 71.6159 81.445 89.6992 93.695Z"
+              fill="url(#logoGrad)" />
+        <defs>
+          <linearGradient id="logoGrad" x1="16" y1="18" x2="96" y2="96" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#c4b5fd" />
+            <stop offset="1" stop-color="#7c5cff" />
+          </linearGradient>
+        </defs>
+      </svg>
+    </span>
+    <div class="brand-text">
+      <span class="title">Antigravity Export</span>
+      <span class="subtitle">Local archive for Brain &amp; conversations</span>
+    </div>
+  </div>
+
+  <div class="topbar-right">
+    <div id="conn-chip" class="chip">
+      <span id="status-dot" class="dot pending"></span>
+      <span id="status-text">Detecting…</span>
+    </div>
+    <button id="btn-refresh" class="icon-btn" title="Re-detect (R)" aria-label="Re-detect">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
+           stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12a9 9 0 1 1-3.51-7.14" />
+        <polyline points="21 3 21 9 15 9" />
+      </svg>
+    </button>
+    <button id="btn-quit" class="icon-btn danger" title="Stop server and close (Q)" aria-label="Quit">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
+           stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18.36 6.64a9 9 0 1 1-12.72 0" />
+        <line x1="12" y1="2" x2="12" y2="12" />
+      </svg>
+    </button>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button class="tab active" data-tab="export" role="tab">Export</button>
+  <button class="tab" data-tab="browse" role="tab">Browse</button>
+  <div class="tab-spacer"></div>
+  <div class="kbd-hint">
+    <kbd>/</kbd> filter &nbsp; <kbd>J</kbd> <kbd>K</kbd> navigate &nbsp; <kbd>Esc</kbd> clear
+  </div>
+</nav>
+
+<main>
+
+  <!-- ───────── BROWSE ───────── -->
+  <section id="panel-browse" class="panel">
+    <aside class="sidebar">
+      <div class="side-head">
+        <div class="search-wrap">
+          <svg class="search-icon" viewBox="0 0 24 24" width="15" height="15" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" />
+            <line x1="21" y1="21" x2="16.5" y2="16.5" />
+          </svg>
+          <input id="filter-input" type="search" placeholder="Filter conversations…" />
+          <kbd class="slash">/</kbd>
+        </div>
+
+        <div class="side-selects">
+          <label>
+            <span class="lbl">Sort</span>
+            <select id="sort-select">
+              <option value="date-desc">Newest first</option>
+              <option value="date-asc">Oldest first</option>
+              <option value="title">Title · A → Z</option>
+              <option value="project">Project · A → Z</option>
+            </select>
+          </label>
+          <label>
+            <span class="lbl">Project</span>
+            <select id="project-select">
+              <option value="">(All)</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="side-count" id="list-count">—</div>
+      </div>
+
+      <div id="conv-list" class="conv-list" tabindex="0" role="listbox"></div>
+    </aside>
+
+    <article class="viewer">
+      <div class="viewer-head">
+        <div class="viewer-head-left">
+          <h1 id="viewer-title">No conversation selected</h1>
+          <div id="viewer-meta" class="meta"></div>
+        </div>
+        <div class="viewer-actions">
+          <button id="btn-export-one" class="primary" disabled>
+            <span>Export this</span>
+            <span class="chev">→</span>
+          </button>
+        </div>
+      </div>
+
+      <div id="viewer-body" class="viewer-body">
+        <div class="empty big">
+          <svg class="empty-illo" viewBox="0 0 64 64" fill="none"
+               stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="8"  y="12" width="30" height="22" rx="4" />
+            <rect x="26" y="26" width="30" height="22" rx="4" />
+          </svg>
+          <h2>Pick a conversation on the left</h2>
+          <p>The user and agent chat renders with full markdown.<br>
+             Thinking and tool traces stay in the on-disk export.</p>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <!-- ───────── EXPORT ───────── -->
+  <section id="panel-export" class="panel active">
+    <form id="export-form" class="export-form" autocomplete="off">
+      <div class="form-scroll">
+        <div class="card">
+          <div class="card-head">
+            <h3>Output folder</h3>
+            <p>Where the archive will be written.</p>
+          </div>
+          <div class="path-row">
+            <input id="opt-output" type="text" spellcheck="false" />
+            <button type="button" id="btn-browse-output" class="ghost">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none"
+                   stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round"
+                   style="margin-right:6px">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              </svg>
+              Browse…
+            </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>What to include</h3>
+            <p>Each piece is optional — tick only what you need.</p>
+          </div>
+          <label class="chk"><input type="checkbox" id="opt-conversations" checked>
+            <span><b>Conversations</b><em>All your Antigravity cascades</em></span>
+          </label>
+          <label class="chk"><input type="checkbox" id="opt-knowledge"     checked>
+            <span><b>Knowledge items</b><em>Your curated Brain knowledge</em></span>
+          </label>
+          <label class="chk"><input type="checkbox" id="opt-artifacts"     checked>
+            <span><b>Brain artifacts</b><em>Scratch output from cascades</em></span>
+          </label>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>Scope</h3>
+            <p>Narrow by project if you only want part of it.</p>
+          </div>
+          <label>
+            <span class="lbl">Only project</span>
+            <select id="opt-project"><option value="">(All projects)</option></select>
+          </label>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>Output style</h3>
+            <p>File naming, grouping, and how much detail to render.</p>
+          </div>
+          <div class="grid-2">
+            <label><span class="lbl">Naming</span>
+              <select id="opt-naming">
+                <option value="title-date">Title (Apr 24, 2026)</option>
+                <option value="date-title">2026-04-24 - Title</option>
+                <option value="iso-title">2026-04-24_Title_Underscores</option>
+                <option value="title-only">Title only</option>
+                <option value="id-title">e92bc17e_Title</option>
+              </select>
+            </label>
+            <label><span class="lbl">Folder layout</span>
+              <select id="opt-layout">
+                <option value="project">By Project</option>
+                <option value="flat">Flat (no grouping)</option>
+                <option value="date">By Month</option>
+              </select>
+            </label>
+            <label><span class="lbl">File format</span>
+              <select id="opt-format">
+                <option value="both">Markdown + JSON</option>
+                <option value="markdown">Markdown only</option>
+                <option value="json">JSON only</option>
+              </select>
+            </label>
+            <label><span class="lbl">Detail level</span>
+              <select id="opt-detail">
+                <option value="full">Full (chat + thinking + tools)</option>
+                <option value="chat">Chat only</option>
+                <option value="thinking">Chat + thinking</option>
+              </select>
+            </label>
+          </div>
+          <label class="chk"><input type="checkbox" id="opt-apply-ts" checked>
+            <span><b>Stamp file dates</b><em>Set mtime to conversation creation time</em></span>
+          </label>
+          <label class="chk"><input type="checkbox" id="opt-wipe"     checked>
+            <span><b>Wipe output folder first</b><em>Delete existing contents before writing</em></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="run-row">
+        <button type="button" id="btn-export" class="primary big">
+          <span>Start export</span>
+        </button>
+        <button type="button" id="btn-open" class="ghost" disabled>
+          Open output folder
+        </button>
+      </div>
+    </form>
+
+    <section class="run-status">
+      <div class="run-status-inner">
+        <div class="progress-row">
+          <span id="phase-label" class="phase">Idle</span>
+          <span id="count-label" class="count"></span>
+        </div>
+        <div class="progress-bar"><div id="bar-fill"></div></div>
+        <div id="progress-detail" class="detail"></div>
+
+        <h3 class="log-title">Activity log</h3>
+        <pre id="log-box" class="log" aria-live="polite"></pre>
+      </div>
+    </section>
+  </section>
+
+</main>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+</body>
+</html>

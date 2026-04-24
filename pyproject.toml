@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "google-antigravity-export"
+version = "0.1.0"
+description = "Export and archive Google Antigravity conversations, Brain knowledge items, and cascade artifacts as clean markdown. Cross-platform (macOS, Windows, Linux) with CLI and GUI."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "winters27" }]
+keywords = [
+    "antigravity",
+    "google-antigravity",
+    "gemini",
+    "gemini-antigravity",
+    "gemini-ide",
+    "cascade",
+    "export",
+    "archive",
+    "backup",
+    "conversations",
+    "chat-history",
+    "protobuf",
+    "decode",
+    "language-server",
+    "ai-tools",
+    "developer-tools",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: X11 Applications",
+    "Environment :: MacOS X",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: Other/Proprietary License",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Utilities",
+    "Topic :: Software Development",
+    "Topic :: System :: Archiving :: Backup",
+    "Topic :: Documentation",
+]
+dependencies = [
+    "psutil>=5.9",
+]
+
+[project.optional-dependencies]
+gui = ["customtkinter>=5.2"]
+
+[project.scripts]
+google-antigravity-export = "antigravity_export.cli:main"
+antigravity-export = "antigravity_export.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/winters27/google-antigravity-export"
+Repository = "https://github.com/winters27/google-antigravity-export"
+Issues = "https://github.com/winters27/google-antigravity-export/issues"
+Source = "https://github.com/winters27/google-antigravity-export"
+
+[tool.hatch.build.targets.wheel]
+packages = ["antigravity_export"]
