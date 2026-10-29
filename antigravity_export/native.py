@@ -37,6 +37,39 @@ def _timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
 
+def _version_for_storage(storage: Path) -> Optional[str]:
+    """Record the installed Antigravity version for normal per-user storage."""
+    default = Path.home() / ".gemini" / "antigravity"
+    if storage.resolve() != default.resolve():
+        return None  # an isolated/test data directory is not the installed IDE
+    if sys.platform == "darwin":
+        import plistlib
+        for path in (Path("/Applications/Antigravity.app/Contents/Info.plist"),
+                     Path.home() / "Applications/Antigravity.app/Contents/Info.plist"):
+            if path.is_file():
+                try:
+                    with path.open("rb") as f:
+                        return plistlib.load(f).get("CFBundleShortVersionString")
+                except (OSError, ValueError):
+                    continue
+    if sys.platform.startswith("linux"):
+        for path in (Path("/opt/antigravity/app/product.json"),
+                     Path.home() / ".local/share/antigravity/app/product.json"):
+            if path.is_file():
+                try:
+                    return json.loads(path.read_text()).get("version")
+                except (OSError, ValueError):
+                    continue
+    return None
+
+
+def _version_numbers(value: Optional[str]) -> tuple:
+    if not value:
+        return ()
+    matches = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:[-+].*)?", value)
+    return tuple(map(int, matches.groups())) if matches else ()
+
+
 def _db_read(path: Path) -> sqlite3.Connection:
     if not path.is_file():
         raise NativeMigrationError(f"Missing SQLite database: {path}")
@@ -277,6 +310,7 @@ def create_native_archive(storage: Path, destination: Path,
                 files.append({"path": "index.json", "size": len(index_bytes),
                               "sha256": hashlib.sha256(index_bytes).hexdigest()})
                 manifest = {"format": FORMAT, "created_at": datetime.now(timezone.utc).isoformat(),
+                            "source_antigravity_version": _version_for_storage(storage),
                             "conversations": conversations, "files": files,
                             "notes": "Native SQLite sessions; import only into compatible Antigravity 2.x"}
                 out.writestr("manifest.json", _json_bytes(manifest))
@@ -365,10 +399,21 @@ def plan_native_import(archive: Path, storage: Path) -> Dict[str, Any]:
             skipped.append(item)
         else:
             imported.append(item)
+    source_version = manifest.get("source_antigravity_version")
+    target_version = _version_for_storage(storage)
+    compatible = True
+    warnings = ["Imported workspace/project associations may need remapping on the new machine.",
+                "Close Antigravity before applying; never import live sessions."]
+    src_nums, dst_nums = _version_numbers(source_version), _version_numbers(target_version)
+    if src_nums and dst_nums and src_nums != dst_nums:
+        warnings.append(f"Antigravity version differs: source {source_version}, target {target_version}.")
+        if src_nums[0] != dst_nums[0] or src_nums > dst_nums:
+            compatible = False
+            warnings.append("Import blocked: the target app is older or is a different major version.")
     return {"archive": str(archive), "storage": str(storage),
             "add": imported, "skip": skipped, "total": len(rows),
-            "warnings": ["Imported workspace/project associations may need remapping on the new machine.",
-                         "Close Antigravity before applying; never import live sessions."]}
+            "source_version": source_version, "target_version": target_version,
+            "compatible": compatible, "warnings": warnings}
 
 
 def _write_exclusive(destination: Path, source, created: Optional[List[Path]] = None) -> None:
@@ -390,6 +435,8 @@ def import_native_archive(archive: Path, storage: Path, apply: bool = False) -> 
     plan["applied"] = False
     if not apply or not plan["add"]:
         return plan
+    if not plan["compatible"]:
+        raise NativeMigrationError("Target Antigravity version is older than the archive source; upgrade the target or use a compatible source")
     active = _running_antigravity()
     if active:
         raise NativeMigrationError(f"Close Antigravity before importing (running: {', '.join(active)})")

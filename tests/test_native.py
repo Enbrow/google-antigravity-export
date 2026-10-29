@@ -134,6 +134,25 @@ class NativeMigrationTests(unittest.TestCase):
         self.assertEqual(con.execute("SELECT COUNT(*) FROM conversation_summaries").fetchone()[0], 1)
         con.close()
 
+    def test_newer_source_is_blocked_on_older_antigravity(self):
+        newer = self.archive.parent / "newer.zip"
+        with zipfile.ZipFile(self.archive) as src, zipfile.ZipFile(newer, "w") as dst:
+            for filename in src.namelist():
+                content = src.read(filename)
+                if filename == "manifest.json":
+                    data = json.loads(content)
+                    data["source_antigravity_version"] = "2.28.1"
+                    content = json.dumps(data).encode()
+                dst.writestr(filename, content)
+        with patch.object(native, "_version_for_storage", return_value="2.24.0"):
+            plan = native.import_native_archive(newer, self.target)
+            self.assertFalse(plan["compatible"])
+            self.assertEqual(plan["source_version"], "2.28.1")
+            self.assertEqual(plan["target_version"], "2.24.0")
+            with self.assertRaisesRegex(native.NativeMigrationError, "older"):
+                native.import_native_archive(newer, self.target, apply=True)
+        self.assertFalse((self.target / "conversations" / f"{FIRST}.db").exists())
+
     def test_no_overwrite_original_archive(self):
         with self.assertRaises(native.NativeMigrationError):
             native.create_native_archive(self.source, self.archive)

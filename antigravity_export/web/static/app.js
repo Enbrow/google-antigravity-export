@@ -499,11 +499,13 @@ async function nativePreviewImport() {
       method: "POST", body: JSON.stringify({ path }),
     });
     const names = r.add.map(x => "+ " + x.title + " (" + x.steps + " steps)");
-    nativeReport("New sessions: " + r.add.length + "\nExisting IDs skipped: " + r.skip.length + "\n\n" +
-                 (names.length ? names.join("\n") : "Nothing new to import.") +
-                 "\n\nClose Antigravity before clicking Import missing sessions.");
+    nativeReport("New sessions: " + r.add.length + "\nExisting IDs skipped: " + r.skip.length +
+                 "\nSource version: " + (r.source_version || "unknown") +
+                 "\nTarget version: " + (r.target_version || "unknown") + "\n\n" +
+                 (names.length ? names.join("\n") : "Nothing new to import.") + "\n\n" +
+                 (r.warnings || []).join("\n"));
     nativeLastPreview = { path, expectedAddIds: r.add.map(x => x.id) };
-    $("#btn-native-apply").disabled = r.add.length === 0;
+    $("#btn-native-apply").disabled = r.add.length === 0 || r.compatible === false;
   } catch (e) {
     nativeReport("Preview failed: " + String(e.message || e));
     toast("err", "Import preview failed", String(e.message || e));

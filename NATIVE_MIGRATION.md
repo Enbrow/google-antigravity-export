@@ -65,9 +65,14 @@ still validates ZIP checksums and compares every conversation ID.
 - **Projects may need remapping**: the source's project IDs and workspace paths
   may not exist on the target, especially across macOS and Linux.
 - **Version compatibility is not guaranteed**: the 2.x native schema is
-  undocumented and may change. Always test the target version. A session being
-  indexed does not guarantee that its prior workspace, tools, or agent runtime
-  can be resumed seamlessly.
+  undocumented and may change. For normal live storage, the native ZIP records
+  the installed Antigravity version. Preview reports both source and target.
+  Importing a **newer** source into an older target (or across major versions)
+  is deliberately blocked, while other version differences are flagged.
+  Upgrade the target through its normal, tested update procedure before retrying.
+  If the version cannot be detected, import is not blocked by this check;
+  validate compatibility manually. A session being indexed does not guarantee
+  that its prior workspace, tools, or agent runtime can be resumed seamlessly.
 - **Search index**: Antigravity's full-text FTS index is not forcibly rewritten.
   Imported sessions are added to the native conversation summary and binary
   summary index; text search availability may depend on Antigravity rebuilding
