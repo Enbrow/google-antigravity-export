@@ -62,17 +62,47 @@ class BrainPathRebaseTests(unittest.TestCase):
         again = rebase_new_session_brain_links(self.storage, CID, source_root)
         self.assertEqual(again["rewritten_references"], 0)
 
-    def test_longer_target_path_is_not_unsafe_rewritten(self):
-        # A short source path cannot be rewritten with a longer target while
-        # preserving nested Protobuf byte-length prefixes.
+    def test_longer_target_path_rewrites_nested_protobuf_lengths(self):
         source_root = "/Users/x/.gemini/antigravity"
-        self.make_db("file://" + source_root + "/brain/" + CID + "/artifact.html")
+        uri = "file://" + source_root + "/brain/" + CID + "/artifact.html"
         dbfile = self.conversations / (CID + ".db")
-        original = dbfile.read_bytes()
+        self.conversations.mkdir(exist_ok=True)
+        with sqlite3.connect(dbfile) as db:
+            db.execute("CREATE TABLE steps (idx INTEGER PRIMARY KEY, step_payload BLOB)")
+            wrapped = _proto_bytes(1, _proto_bytes(2, _proto_bytes(5, uri.encode())))
+            db.execute("INSERT INTO steps VALUES (1, ?)", (wrapped,))
         report = rebase_new_session_brain_links(self.storage, CID, source_root)
-        self.assertEqual(report["rewritten_references"], 0)
-        self.assertEqual(report["unmapped_source_prefixes"], 1)
-        self.assertEqual(dbfile.read_bytes(), original)
+        self.assertEqual(report["rewritten_references"], 1)
+        self.assertEqual(report["unmapped_source_prefixes"], 0)
+        with sqlite3.connect(dbfile) as db:
+            data = db.execute("SELECT step_payload FROM steps").fetchone()[0]
+            self.assertEqual(db.execute("PRAGMA quick_check").fetchone()[0], "ok")
+        self.assertIn(str(self.brain).encode(), data)
+        self.assertNotIn(source_root.encode(), data)
+        self.assertEqual(len(data), len(wrapped) + len(str(self.brain)) - len(source_root + "/brain/" + CID))
+
+    def test_rejects_unrecognized_binary_blob(self):
+        from antigravity_export.rebase import UnsafeProtobufRewrite, _rewrite_field
+        source = b"file:///Users/x/.gemini/antigravity/brain/" + CID.encode() + b"/"
+        target = (self.brain.as_posix() + "/").encode()
+        with self.assertRaises(UnsafeProtobufRewrite):
+            _rewrite_field(b"\xff\x00" + source + b"artifact.html", [(source, target)])
+
+    def test_old_padded_linux_path_becomes_canonical(self):
+        padded = str(self.brain).replace("/.gemini/", "//.gemini/")
+        # The temporary directory may not be inside .gemini; add one using
+        # a realistic Brain root fixture for the Linux import format.
+        self.make_db("file:///home/ubuntu//.gemini/antigravity/brain/" + CID + "/artifact.html")
+        dbfile = self.conversations / (CID + ".db")
+        report = rebase_new_session_brain_links(
+            self.storage, CID,
+            "/home/ubuntu//.gemini/antigravity"
+        )
+        self.assertEqual(report["rewritten_references"], 1)
+        with sqlite3.connect(dbfile) as db:
+            payload = db.execute("SELECT step_payload FROM steps").fetchone()[0]
+        self.assertIn(str(self.brain).encode(), payload)
+        self.assertNotIn(b"file:///home/ubuntu//.gemini", payload)
 
 
 if __name__ == "__main__":

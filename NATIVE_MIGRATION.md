@@ -44,15 +44,15 @@ still validates ZIP checksums and compares every conversation ID.
 
 ## Local artifact path portability
 
-Starting with 0.2.1, the importer attempts to adapt references to files stored
+Starting with 0.2.2, the importer attempts to adapt references to files stored
 inside the imported session's Brain folder. It only modifies newly inserted
 session records and generated transcript sidecars; the artifact files themselves
 are copied unchanged. Existing destination conversations are never modified.
 
-For Protobuf safety, the importer only adjusts references if the replacement
-can preserve the original UTF-8 byte length, using redundant POSIX path
-separators if necessary. Other mappings remain untouched and are reported as
-unmapped prefixes. This is best-effort for macOS/Linux; external project file
+For Protobuf safety, the importer rewrites nested serialized fields and their
+length prefixes, even when source and target paths differ in byte length. This
+produces canonical file URIs that match the Antigravity artifact index.
+Unrecognized binary payloads fail closed instead of being blindly patched. This is best-effort for macOS/Linux; external project file
 paths and Windows-specific paths may still require manual handling.
 
 ## Safety guarantees and limitations

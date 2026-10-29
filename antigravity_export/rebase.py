@@ -1,9 +1,9 @@
-"""Rebase imported local Brain-file references without corrupting Protobuf lengths.
+"""Safe canonical Brain-file references in native Antigravity SQLite sessions.
 
-Antigravity stores absolute file paths inside serialized conversation BLOBs and
-generated transcript logs. For a newly copied session, only those paths that
-point to that session's Brain directory are eligible for repair. Other paths
-(such as unrelated project/workspace files) remain unchanged.
+The Antigravity UI matches canonical artifact snapshot URIs against paths stored
+in protobuf step payloads. Padding a shorter target path with additional slashes
+does resolve on POSIX, but the React artifact URI match fails. Instead, rewrite
+each protobuf string and update every enclosing length-delimited field.
 """
 
 from __future__ import annotations
@@ -11,112 +11,239 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+import stat
 from pathlib import Path
 from typing import Optional
 
 
-def rebase_new_session_brain_links(
-    storage: Path, conversation_id: str, source_storage_root: Optional[str] = None
-) -> dict:
-    """Rebase paths on a session that the importer *just created*.
+class UnsafeProtobufRewrite(ValueError):
+    """A serialized payload cannot be safely rewritten without its schema."""
 
-    Protobuf messages embed byte lengths. A replacement is only safe when
-    the path prefix remains the same UTF-8 length. If the target is shorter,
-    redundant forward slashes pad it without altering filesystem resolution.
-    Otherwise the path is left untouched, and the report records a warning.
-    This routine must never be called on a pre-existing destination UUID.
+
+def _varint_at(data: bytes, pos: int) -> tuple[int, int]:
+    number = 0
+    for shift in range(0, 70, 7):
+        if pos >= len(data):
+            raise UnsafeProtobufRewrite("Truncated protobuf varint")
+        byte = data[pos]
+        pos += 1
+        number |= (byte & 0x7F) << shift
+        if byte < 0x80:
+            return number, pos
+    raise UnsafeProtobufRewrite("Oversized protobuf varint")
+
+
+def _varint(value: int) -> bytes:
+    if value < 0:
+        raise UnsafeProtobufRewrite("Negative protobuf length")
+    result = bytearray()
+    while value >= 0x80:
+        result.append((value & 0x7F) | 0x80)
+        value >>= 7
+    result.append(value)
+    return bytes(result)
+
+
+def rewrite_protobuf_uris(
+    data: bytes, substitutions: list[tuple[bytes, bytes]], depth: int = 0
+) -> tuple[bytes, int]:
+    """Rewrite literal URI/path bytes inside a protobuf message.
+
+    Unknown field bytes and field order are retained exactly. When a wire-type
+    2 child contains a target path, first attempt recursive protobuf parsing.
+    Otherwise treat the child as a UTF-8 string and adjust the parent's encoded
+    length. Never edit unrecognized non-text binary data in place.
+    """
+    if depth > 32:
+        raise UnsafeProtobufRewrite("Protobuf message nesting too deep")
+    pos = 0
+    result = bytearray()
+    count = 0
+    while pos < len(data):
+        begin = pos
+        tag, pos = _varint_at(data, pos)
+        field, wire = tag >> 3, tag & 7
+        if not 1 <= field < (1 << 29):
+            raise UnsafeProtobufRewrite("Invalid protobuf field number")
+        if wire == 2:
+            size, pos = _varint_at(data, pos)
+            end = pos + size
+            if end > len(data):
+                raise UnsafeProtobufRewrite("Truncated protobuf length-delimited value")
+            value = data[pos:end]
+            if not any(old in value for old, _ in substitutions):
+                result.extend(data[begin:end])
+            else:
+                try:
+                    updated, hits = rewrite_protobuf_uris(value, substitutions, depth + 1)
+                except UnsafeProtobufRewrite:
+                    try:
+                        value.decode("utf-8")
+                    except UnicodeDecodeError as exc:
+                        raise UnsafeProtobufRewrite(
+                            "Path appears in non-UTF8 binary data"
+                        ) from exc
+                    updated = value
+                    hits = 0
+                    for old, new in substitutions:
+                        hits += updated.count(old)
+                        updated = updated.replace(old, new)
+                if hits == 0 or any(old in updated for old, _ in substitutions):
+                    raise UnsafeProtobufRewrite("Could not safely rewrite nested path")
+                result.extend(_varint(tag))
+                result.extend(_varint(len(updated)))
+                result.extend(updated)
+                count += hits
+            pos = end
+        elif wire == 0:
+            _, pos = _varint_at(data, pos)
+            result.extend(data[begin:pos])
+        elif wire in (1, 5):
+            pos += 8 if wire == 1 else 4
+            if pos > len(data):
+                raise UnsafeProtobufRewrite("Truncated protobuf fixed-width value")
+            result.extend(data[begin:pos])
+        else:
+            raise UnsafeProtobufRewrite("Unsupported protobuf wire type")
+    return bytes(result), count
+
+
+def _rewrite_field(value: str | bytes, pairs: list[tuple[bytes, bytes]]) -> tuple[str | bytes, int]:
+    if isinstance(value, str):
+        updated = value
+        count = 0
+        for old, new in pairs:
+            src, dest = old.decode("utf-8"), new.decode("utf-8")
+            count += updated.count(src)
+            updated = updated.replace(src, dest)
+        return updated, count
+    if not any(old in value for old, _ in pairs):
+        return value, 0
+    try:
+        updated, count = rewrite_protobuf_uris(value, pairs)
+    except UnsafeProtobufRewrite:
+        try:
+            decoded = value.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise UnsafeProtobufRewrite(
+                "Unrecognized non-text SQLite BLOB with artifact link"
+            ) from exc
+        if any(ord(ch) < 32 and ch not in "\t\n\r" for ch in decoded):
+            raise UnsafeProtobufRewrite("Unrecognized binary SQLite BLOB with artifact link")
+        updated = value
+        count = 0
+        for old, new in pairs:
+            count += updated.count(old)
+            updated = updated.replace(old, new)
+    if any(old in updated for old, _ in pairs):
+        raise UnsafeProtobufRewrite("Unrepaired artifact URI in SQLite BLOB")
+    return updated, count
+
+
+def rebase_brain_artifact_links(
+    storage: Path, conversation_id: str, source_storage_root: Optional[str] = None,
+    update_generated: bool = True
+) -> dict:
+    """Canonicalize one session's Brain references after it is safely backed up.
+
+    Caller must ensure the IDE is closed and the target session is newly
+    imported, or deliberately invoke this on a selected existing session after
+    making a complete verified backup. This function does not touch other UUIDs.
     """
     report = {
-        "id": conversation_id, "rewritten_references": 0,
-        "updated_generated_files": 0, "unmapped_source_prefixes": 0,
+        "id": conversation_id,
+        "rewritten_references": 0,
+        "updated_generated_files": 0,
+        "unmapped_source_prefixes": 0,
     }
     if os.name != "posix":
-        return report  # Windows path mapping is not yet supported.
+        return report
 
+    storage = storage.expanduser().resolve()
     db_path = storage / "conversations" / (conversation_id + ".db")
-    if not db_path.is_file():
-        raise FileNotFoundError("Imported conversation database missing: " + str(db_path))
-
+    if not db_path.is_file() or db_path.is_symlink():
+        raise FileNotFoundError("Missing or unsafe conversation database: " + str(db_path))
     target = (storage / "brain" / conversation_id).as_posix().encode("utf-8") + b"/"
     raw = db_path.read_bytes()
-    source_roots = set(
-        re.findall(
-            rb"/(?:Users|home)/[^/\x00]{1,80}/\.gemini/antigravity/brain/"
-            + re.escape(conversation_id.encode("ascii")) + rb"/",
-            raw,
-        )
+
+    # Match conventional absolute paths from the source computer, including
+    # paths previously padded with repeated slashes by older importer versions.
+    pattern = (
+        rb"/(?:Users|home)/[^/\x00]{1,100}/+\.gemini/antigravity/brain/"
+        + re.escape(conversation_id.encode("ascii")) + rb"/"
     )
+    old_roots = set(re.findall(pattern, raw))
     if source_storage_root and source_storage_root.startswith("/"):
         candidate = (source_storage_root.rstrip("/") + "/brain/" + conversation_id + "/").encode()
         if candidate in raw:
-            source_roots.add(candidate)
+            old_roots.add(candidate)
 
-    pairs = []
-    for old in sorted(source_roots):
-        if os.path.normpath(old.decode("utf-8")) == os.path.normpath(target.decode("utf-8")):
+    substitutions = []
+    for old in sorted(old_roots, key=len, reverse=True):
+        if old == target:
             continue
-        if len(old) < len(target):
-            report["unmapped_source_prefixes"] += 1
-            continue
-        replacement = target + b"/" * (len(old) - len(target))
-        assert len(replacement) == len(old)
-        pairs.append((old, replacement))
-
-    if not pairs:
+        substitutions.append((old, target))
+    if not substitutions:
         return report
 
-    with sqlite3.connect(db_path) as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        table_names = [r[0] for r in conn.execute(
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        tables = [r[0] for r in connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
         )]
-        for table in table_names:
+        for table in tables:
             safe_table = '"' + table.replace('"', '""') + '"'
-            columns = [r[1] for r in conn.execute("PRAGMA table_info(" + safe_table + ")")]
-            for col in columns:
+            cols = [r[1] for r in connection.execute("PRAGMA table_info(" + safe_table + ")")]
+            for col in cols:
                 safe_col = '"' + col.replace('"', '""') + '"'
-                for rowid, value in conn.execute(
-                    "SELECT rowid," + safe_col + " FROM " + safe_table
+                for rowid, value in connection.execute(
+                    "SELECT rowid, " + safe_col + " FROM " + safe_table
                 ):
                     if not isinstance(value, (str, bytes)):
                         continue
-                    output = value
-                    for old, replacement in pairs:
-                        needle = old if isinstance(value, bytes) else old.decode("utf-8")
-                        repl = replacement if isinstance(value, bytes) else replacement.decode("utf-8")
-                        report["rewritten_references"] += output.count(needle)
-                        output = output.replace(needle, repl)
-                    if output == value:
+                    if not any((old.decode("utf-8") if isinstance(value, str) else old) in value
+                               for old, _ in substitutions):
                         continue
-                    original_bytes = value.encode() if isinstance(value, str) else value
-                    changed_bytes = output.encode() if isinstance(output, str) else output
-                    if len(original_bytes) != len(changed_bytes):
-                        raise ValueError("Refusing length-changing Protobuf alteration")
-                    conn.execute(
-                        "UPDATE " + safe_table + " SET " + safe_col + "=? WHERE rowid=?",
-                        (output, rowid),
-                    )
-        if conn.execute("PRAGMA quick_check").fetchone()[0] != "ok":
-            raise ValueError("SQLite integrity check failed after artifact path repair")
+                    updated, count = _rewrite_field(value, substitutions)
+                    report["rewritten_references"] += count
+                    if updated != value:
+                        connection.execute(
+                            "UPDATE " + safe_table + " SET " + safe_col + "=? WHERE rowid=?",
+                            (updated, rowid),
+                        )
+        if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+            raise UnsafeProtobufRewrite("SQLite quick_check failed after rewriting paths")
 
-    # Sidecar logs may be read by the IDE while resuming a conversation.
-    # Never modify an agent-created HTML/JS artifact itself.
     generated = storage / "brain" / conversation_id / ".system_generated"
-    if generated.is_dir():
-        for file in generated.rglob("*"):
+    if update_generated and generated.is_dir():
+        for file in sorted(generated.rglob("*")):
             if file.is_symlink():
-                raise ValueError("Symlink found in imported generated sidecar")
+                raise UnsafeProtobufRewrite("Symlinks are not permitted in generated files")
             if not file.is_file():
                 continue
             original = file.read_bytes()
             updated = original
-            for old, replacement in pairs:
-                updated = updated.replace(old, replacement)
+            for old, new in substitutions:
+                updated = updated.replace(old, new)
             if updated == original:
                 continue
-            if len(updated) != len(original):
-                raise ValueError("Refusing length-changing generated log alteration")
-            file.write_bytes(updated)
+            mode = stat.S_IMODE(file.stat().st_mode)
+            temporary = file.with_name(file.name + ".ag-rebase-tmp")
+            if temporary.exists():
+                raise UnsafeProtobufRewrite("Unexpected temporary file: " + str(temporary))
+            try:
+                with temporary.open("xb") as stream:
+                    stream.write(updated)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.chmod(temporary, mode)
+                os.replace(temporary, file)
+            finally:
+                if temporary.exists():
+                    temporary.unlink()
             report["updated_generated_files"] += 1
-
     return report
+
+
+# Compatibility with v0.2.1 caller and tests.
+rebase_new_session_brain_links = rebase_brain_artifact_links
