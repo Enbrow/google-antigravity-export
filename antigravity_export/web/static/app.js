@@ -93,21 +93,31 @@ function setStatus(connected, text, cls) {
 
 async function loadStatus() {
   try {
-    const r = await api("/api/status");
+    const status = await api("/api/status");
+    if (status.defaultOutput && !$("#opt-output").value) {
+      $("#opt-output").value = status.defaultOutput;
+    }
+    if (status.lastOutput) S.lastOutput = status.lastOutput;
+
+    // A failed startup discovery does not retry on the server by itself.
+    // Calling /api/status repeatedly would otherwise leave the UI stuck
+    // on "Detecting Antigravity" indefinitely.
+    const r = status.connected
+      ? status
+      : await api("/api/detect", { method: "POST", body: "{}" });
     if (r.connected) {
       setStatus(true, `pid ${r.pid} · port ${r.port} · ${r.count} conversations`, "ok");
+      $("#status-text").title = "";
       await loadConversations();
     } else {
-      setStatus(false, "Detecting Antigravity…", "pending");
-      setTimeout(loadStatus, 600);
-      return;
+      setStatus(false, "Antigravity not ready · retrying…", "pending");
+      $("#status-text").title = r.error || "";
+      setTimeout(loadStatus, 2500);
     }
-    if (r.defaultOutput && !$("#opt-output").value) {
-      $("#opt-output").value = r.defaultOutput;
-    }
-    if (r.lastOutput) S.lastOutput = r.lastOutput;
-  } catch {
-    setStatus(false, "API unreachable", "err");
+  } catch (e) {
+    setStatus(false, "Connection failed · retrying…", "err");
+    $("#status-text").title = String(e.message || e);
+    setTimeout(loadStatus, 2500);
   }
 }
 
@@ -418,7 +428,7 @@ function logLine(msg, cls) {
   box.scrollTop = box.scrollHeight;
 }
 
-// ─── server lifecycle: heartbeat + shutdown on unload ────────────────
+// ─── server lifecycle: heartbeat + explicit shutdown ─────────────────
 function startHeartbeat() {
   const tick = () => {
     fetch("/api/heartbeat", { method: "POST", body: "{}",
@@ -527,8 +537,8 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   document.addEventListener("keydown", onKey);
-  window.addEventListener("beforeunload", stopServerBeacon);
-  window.addEventListener("pagehide", stopServerBeacon);
+  // The heartbeat watchdog already handles closed tabs. Shutting down on
+  // beforeunload/pagehide also kills the server during a normal page reload.
 
   startHeartbeat();
   loadStatus();
