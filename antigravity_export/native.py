@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .rebase import rebase_new_session_brain_links
+
 FORMAT = "antigravity-native-sessions-v1"
 ID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 MAX_UNPACKED = 4 * 1024 ** 3
@@ -311,6 +313,7 @@ def create_native_archive(storage: Path, destination: Path,
                               "sha256": hashlib.sha256(index_bytes).hexdigest()})
                 manifest = {"format": FORMAT, "created_at": datetime.now(timezone.utc).isoformat(),
                             "source_antigravity_version": _version_for_storage(storage),
+                            "source_storage_root": str(storage),
                             "conversations": conversations, "files": files,
                             "notes": "Native SQLite sessions; import only into compatible Antigravity 2.x"}
                 out.writestr("manifest.json", _json_bytes(manifest))
@@ -492,6 +495,14 @@ def import_native_archive(archive: Path, storage: Path, apply: bool = False) -> 
                 else:
                     with z.open(filename) as f:
                         _write_exclusive(target, f, created)
+
+        # Cross-machine file links may still point at the source user's Brain
+        # directory. Rebase *new* sessions only; never mutate existing UUIDs.
+        plan["artifact_path_rebase"] = [
+            rebase_new_session_brain_links(
+                storage, cid, _manifest.get("source_storage_root")
+            ) for cid in add_ids
+        ]
 
         if merged_proto != original_proto:
             temp_proto = proto_path.with_name(proto_path.name + f".new-{os.getpid()}")

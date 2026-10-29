@@ -530,8 +530,14 @@ async function nativeApplyImport() {
     const result = await api("/api/native/apply", {
       method: "POST", body: JSON.stringify(nativeLastPreview),
     });
+    const adjusted = (result.artifact_path_rebase || [])
+      .reduce((sum, r) => sum + (r.rewritten_references || 0), 0);
+    const unmapped = (result.artifact_path_rebase || [])
+      .reduce((sum, r) => sum + (r.unmapped_source_prefixes || 0), 0);
     nativeReport("Imported: " + (result.inserted || 0) + "\n" +
                  "Existing preserved: " + (result.preserved_existing || result.skip.length) + "\n" +
+                 "Repaired artifact path references: " + adjusted + "\n" +
+                 "Unmapped source path prefixes: " + unmapped + "\n" +
                  "Rollback snapshot: " + (result.backup || "(not needed)") + "\n" +
                  "Restart Antigravity to inspect imported sessions.");
     toast("ok", "Import completed", (result.inserted || 0) + " new sessions");

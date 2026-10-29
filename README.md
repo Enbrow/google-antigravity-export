@@ -126,6 +126,10 @@ import** panel in `--web`, or the `--native-export` / `--native-import` CLI
 commands. Native ZIP files preserve SQLite conversations and summary metadata;
 the regular Markdown/JSON export is unchanged and remains a readable archive.
 
+Version 0.2.1 also repairs supported local Brain-file references in newly
+imported sessions without changing the original artifact files. Unresolved
+cross-platform paths are reported, not silently rewritten.
+
 **Imports are preview-only by default**, and require `--apply` plus Antigravity
 being closed before any data is written. All existing conversation UUIDs are
 skipped without overwriting the target. The importer makes an automatic

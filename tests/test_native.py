@@ -62,8 +62,13 @@ class NativeMigrationTests(unittest.TestCase):
         make_storage(self.target, SECOND, "destination-only")
         self.before = (self.target / "conversations" / f"{SECOND}.db").read_bytes()
         native.create_native_archive(self.source, self.archive)
+        # Tests use disposable private directories, never the live IDE store.
+        # Keep CI independent of whether Antigravity is open on this machine.
+        self.process_guard = patch.object(native, "_running_antigravity", return_value=[])
+        self.process_guard.start()
 
     def tearDown(self):
+        self.process_guard.stop()
         self.temp.cleanup()
 
     def test_preview_is_read_only(self):

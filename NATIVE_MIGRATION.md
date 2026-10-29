@@ -42,6 +42,19 @@ Use `--gemini-dir /path/to/antigravity` to choose an isolated storage directory
 for testing; this is strongly recommended before importing real data. A dry run
 still validates ZIP checksums and compares every conversation ID.
 
+## Local artifact path portability
+
+Starting with 0.2.1, the importer attempts to adapt references to files stored
+inside the imported session's Brain folder. It only modifies newly inserted
+session records and generated transcript sidecars; the artifact files themselves
+are copied unchanged. Existing destination conversations are never modified.
+
+For Protobuf safety, the importer only adjusts references if the replacement
+can preserve the original UTF-8 byte length, using redundant POSIX path
+separators if necessary. Other mappings remain untouched and are reported as
+unmapped prefixes. This is best-effort for macOS/Linux; external project file
+paths and Windows-specific paths may still require manual handling.
+
 ## Safety guarantees and limitations
 
 - **Add-only**: if a UUID is present in the target summary index, session file,
