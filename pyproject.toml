@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "google-antigravity-export"
-version = "0.1.0"
+version = "0.2.0"
 description = "Export and archive Google Antigravity conversations, Brain knowledge items, and cascade artifacts as clean markdown. Cross-platform (macOS, Windows, Linux) with CLI and GUI."
 readme = "README.md"
 requires-python = ">=3.9"

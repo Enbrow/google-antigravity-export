@@ -118,6 +118,24 @@ Both launchers do the same thing as the command above. The package still needs t
 
 Nothing leaves your machine — all traffic is between your browser and `127.0.0.1`.
 
+## Native session backup and additive import (Antigravity 2.x)
+
+Need to move sessions to a different Antigravity installation while keeping the
+destination's existing sessions intact? Use the new **Native session backup &
+import** panel in `--web`, or the `--native-export` / `--native-import` CLI
+commands. Native ZIP files preserve SQLite conversations and summary metadata;
+the regular Markdown/JSON export is unchanged and remains a readable archive.
+
+**Imports are preview-only by default**, and require `--apply` plus Antigravity
+being closed before any data is written. All existing conversation UUIDs are
+skipped without overwriting the target. The importer makes an automatic
+pre-import index snapshot.
+
+See [Native session migration](NATIVE_MIGRATION.md) for complete safety
+details, commands and cross-platform limitations.
+
+---
+
 ## Quick start (CLI)
 
 1. Open Antigravity and wait for the UI to finish loading.

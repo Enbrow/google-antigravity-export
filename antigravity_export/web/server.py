@@ -26,6 +26,7 @@ import sys
 import threading
 import time
 import traceback
+import zipfile
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -40,6 +41,10 @@ from ..export import (
     export_single_conversation,
     project_from_workspaces,
     run_export,
+)
+from ..native import (
+    NativeMigrationError, create_native_archive,
+    plan_native_import, import_native_archive,
 )
 from ..render import _extract_user_text
 
@@ -363,6 +368,40 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/detect":
             self._send_json(run_discovery())
+            return
+
+        if path in ("/api/native/export", "/api/native/plan", "/api/native/apply"):
+            # Browser pages on other origins must not be able to trigger local
+            # filesystem writes via a cross-site request.
+            origin = self.headers.get("Origin")
+            if origin and origin != "http://" + self.headers.get("Host", ""):
+                self._send_json({"error": "Cross-origin native migration request blocked"}, 403)
+                return
+            requested_path = str(data.get("path") or "").strip()
+            if not requested_path:
+                self._send_json({"error": "Please specify the local ZIP file path"}, 400)
+                return
+            try:
+                src = Path(requested_path).expanduser()
+                storage = default_gemini_dir()
+                if path == "/api/native/export":
+                    if not src.name.lower().endswith(".zip"):
+                        raise NativeMigrationError("Native archive file must end in .zip")
+                    result = create_native_archive(storage, src)
+                elif path == "/api/native/plan":
+                    result = plan_native_import(src, storage)
+                else:
+                    if not isinstance(data.get("expectedAddIds"), list):
+                        raise NativeMigrationError("Preview the import before applying")
+                    preview = plan_native_import(src, storage)
+                    expected = sorted(data["expectedAddIds"])
+                    if expected != sorted(r["id"] for r in preview["add"]):
+                        raise NativeMigrationError("Import plan changed. Preview again before applying")
+                    result = import_native_archive(src, storage, apply=True)
+                self._send_json(result)
+            except (NativeMigrationError, OSError, ValueError, KeyError, TypeError,
+                    zipfile.BadZipFile) as e:
+                self._send_json({"error": str(e)}, 400)
             return
 
         if path == "/api/export":

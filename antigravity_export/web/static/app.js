@@ -60,7 +60,10 @@ async function api(path, opts = {}) {
     ...opts,
     headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    const details = await res.json().catch(() => ({}));
+    throw new Error(details.error || "HTTP " + res.status);
+  }
   return res.json();
 }
 
@@ -96,6 +99,11 @@ async function loadStatus() {
     const status = await api("/api/status");
     if (status.defaultOutput && !$("#opt-output").value) {
       $("#opt-output").value = status.defaultOutput;
+    }
+    if (status.defaultOutput && !$("#native-backup-path").value) {
+      const directory = status.defaultOutput.replace(/[\\/][^\\/]+$/, "");
+      const day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      $("#native-backup-path").value = directory + "/AntigravityNative-" + day + ".zip";
     }
     if (status.lastOutput) S.lastOutput = status.lastOutput;
 
@@ -450,6 +458,88 @@ async function quitServer() {
   setTimeout(() => window.close(), 400);
 }
 
+// ─── native offline session migration ────────────────────────────────
+let nativeLastPreview = null;
+
+function nativeReport(text) {
+  $("#native-report").textContent = text;
+}
+
+async function nativeCreateBackup() {
+  const path = $("#native-backup-path").value.trim();
+  if (!path) { toast("err", "Enter a ZIP file path"); return; }
+  const btn = $("#btn-native-backup");
+  btn.disabled = true;
+  nativeReport("Creating native archive and verifying SQLite snapshots…");
+  try {
+    const r = await api("/api/native/export", {
+      method: "POST", body: JSON.stringify({ path }),
+    });
+    nativeReport("Created " + r.conversations + " native sessions, " + r.files + " files\n" +
+                 "Archive: " + r.archive + "\nSize: " + (r.size / 1048576).toFixed(2) + " MiB");
+    toast("ok", "Native backup created", r.conversations + " sessions");
+  } catch (e) {
+    nativeReport("Backup failed: " + String(e.message || e));
+    toast("err", "Native backup failed", String(e.message || e));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function nativePreviewImport() {
+  const path = $("#native-import-path").value.trim();
+  nativeLastPreview = null;
+  $("#btn-native-apply").disabled = true;
+  if (!path) { toast("err", "Enter the full path of the native ZIP"); return; }
+  const btn = $("#btn-native-preview");
+  btn.disabled = true;
+  nativeReport("Verifying ZIP integrity and comparing conversation UUIDs…");
+  try {
+    const r = await api("/api/native/plan", {
+      method: "POST", body: JSON.stringify({ path }),
+    });
+    const names = r.add.map(x => "+ " + x.title + " (" + x.steps + " steps)");
+    nativeReport("New sessions: " + r.add.length + "\nExisting IDs skipped: " + r.skip.length + "\n\n" +
+                 (names.length ? names.join("\n") : "Nothing new to import.") +
+                 "\n\nClose Antigravity before clicking Import missing sessions.");
+    nativeLastPreview = { path, expectedAddIds: r.add.map(x => x.id) };
+    $("#btn-native-apply").disabled = r.add.length === 0;
+  } catch (e) {
+    nativeReport("Preview failed: " + String(e.message || e));
+    toast("err", "Import preview failed", String(e.message || e));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function nativeApplyImport() {
+  if (!nativeLastPreview || nativeLastPreview.path !== $("#native-import-path").value.trim()) {
+    toast("err", "Run Preview import again");
+    return;
+  }
+  const n = nativeLastPreview.expectedAddIds.length;
+  if (!window.confirm("Import " + n + " new Antigravity session(s)?\n\n" +
+      "Antigravity must be CLOSED. Existing conversation IDs will never be overwritten. " +
+      "A pre-import backup of the target indexes will be saved.")) return;
+  const btn = $("#btn-native-apply");
+  btn.disabled = true;
+  nativeReport("Importing native session databases and updating indexes…");
+  try {
+    const result = await api("/api/native/apply", {
+      method: "POST", body: JSON.stringify(nativeLastPreview),
+    });
+    nativeReport("Imported: " + (result.inserted || 0) + "\n" +
+                 "Existing preserved: " + (result.preserved_existing || result.skip.length) + "\n" +
+                 "Rollback snapshot: " + (result.backup || "(not needed)") + "\n" +
+                 "Restart Antigravity to inspect imported sessions.");
+    toast("ok", "Import completed", (result.inserted || 0) + " new sessions");
+    nativeLastPreview = null;
+  } catch (e) {
+    nativeReport("Import failed: " + String(e.message || e) + "\nNo existing sessions should be overwritten.");
+    toast("err", "Native import failed", String(e.message || e));
+  }
+}
+
 // ─── keyboard shortcuts ──────────────────────────────────────────────
 function onKey(e) {
   const tag = (document.activeElement?.tagName || "").toLowerCase();
@@ -490,6 +580,14 @@ function onKey(e) {
 // ─── wire up ──────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
   $$(".tab").forEach(t => t.addEventListener("click", () => switchTab(t.dataset.tab)));
+
+  $("#btn-native-backup").addEventListener("click", nativeCreateBackup);
+  $("#btn-native-preview").addEventListener("click", nativePreviewImport);
+  $("#btn-native-apply").addEventListener("click", nativeApplyImport);
+  $("#native-import-path").addEventListener("input", () => {
+    nativeLastPreview = null;
+    $("#btn-native-apply").disabled = true;
+  });
 
   $("#btn-refresh").addEventListener("click", redetect);
   $("#btn-quit").addEventListener("click", quitServer);
