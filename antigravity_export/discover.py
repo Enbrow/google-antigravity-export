@@ -110,10 +110,17 @@ def _probe_port(port: int, csrf: str, timeout: float = 3.0) -> bool:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             if resp.status != 200:
                 return False
-            # Just sniff the first ~64 bytes — a matching port always begins with
-            # `{"trajectorySummaries"`. The other ports return 4xx or different JSON.
-            head = resp.read(64)
-            return b'"trajectorySummaries"' in head
+            # An empty conversation index is a valid response on newer
+            # Antigravity builds: GetAllCascadeTrajectories can return {} even
+            # while SQLite-backed local conversations remain accessible.
+            # Still require an HTTP 200 from this precise RPC endpoint.
+            head = resp.read(4096)
+            if b'"trajectorySummaries"' in head:
+                return True
+            try:
+                return json.loads(head) == {}
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return False
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError):
         return False
 
