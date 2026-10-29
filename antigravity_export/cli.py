@@ -7,8 +7,6 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .discover import DiscoveryError, discover
-from .export import ExportOptions, default_gemini_dir, run_export
 from .naming import DETAIL_CHOICES, FORMAT_CHOICES, LAYOUT_CHOICES, NAMING_CHOICES
 
 
@@ -54,6 +52,19 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Detect process/token/port and print them; don't export anything",
     )
+    native = p.add_mutually_exclusive_group()
+    native.add_argument(
+        "--native-export", type=Path, metavar="ARCHIVE.zip",
+        help="Back up native SQLite sessions to an importable ZIP (does not need the live API)",
+    )
+    native.add_argument(
+        "--native-import", type=Path, metavar="ARCHIVE.zip",
+        help="Preview additive native-session import; specify --apply to perform it",
+    )
+    p.add_argument("--native-id", action="append", default=[], metavar="UUID",
+                   help="Include only this conversation in --native-export (repeatable)")
+    p.add_argument("--apply", action="store_true",
+                   help="Apply --native-import after checking that Antigravity is closed")
     p.add_argument("-v", "--verbose", action="store_true", help="Verbose discovery output")
     p.add_argument(
         "--gui",
@@ -149,6 +160,33 @@ def main(argv: list[str] | None = None) -> int:
                 reconf(encoding="utf-8")
             except Exception:
                 pass
+
+    if args.native_export or args.native_import:
+        from .native import NativeMigrationError, create_native_archive, import_native_archive
+        storage = (args.gemini_dir or (Path.home() / ".gemini" / "antigravity")).expanduser()
+        try:
+            if args.native_export:
+                if args.apply:
+                    print("ERROR: --apply is only valid with --native-import", file=sys.stderr)
+                    return 2
+                result = create_native_archive(storage, args.native_export, args.native_id)
+            else:
+                if args.native_id:
+                    print("ERROR: --native-id is only valid with --native-export", file=sys.stderr)
+                    return 2
+                result = import_native_archive(args.native_import, storage, apply=args.apply)
+            import json
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        except Exception as exc:
+            print(f"Native migration failed: {exc}", file=sys.stderr)
+            return 2
+    if args.apply or args.native_id:
+        print("ERROR: --apply/--native-id require a native command", file=sys.stderr)
+        return 2
+
+    from .discover import DiscoveryError, discover
+    from .export import ExportOptions, default_gemini_dir, run_export
 
     if args.web:
         from .web import run_web

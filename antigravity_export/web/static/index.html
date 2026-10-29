@@ -230,6 +230,28 @@
             <span><b>Wipe output folder first</b><em>Delete existing contents before writing</em></span>
           </label>
         </div>
+
+        <div class="card" id="native-migration">
+          <div class="card-head">
+            <h3>Native session backup &amp; import (Antigravity 2.x)</h3>
+            <p>Portable ZIP for opening conversations on another computer. This is separate from the readable Markdown/JSON export.</p>
+          </div>
+          <label for="native-backup-path"><span class="lbl">Save native archive to</span></label>
+          <div class="path-row">
+            <input id="native-backup-path" type="text" spellcheck="false" placeholder="~/Desktop/AntigravityNative-20261030.zip">
+            <button type="button" class="ghost" id="btn-native-backup">Create ZIP</button>
+          </div>
+          <label for="native-import-path"><span class="lbl">Import an existing native ZIP (full local file path)</span></label>
+          <div class="path-row">
+            <input id="native-import-path" type="text" spellcheck="false" placeholder="/path/to/AntigravityNative.zip">
+          </div>
+          <div class="native-actions">
+            <button type="button" class="ghost" id="btn-native-preview">Preview import</button>
+            <button type="button" class="primary" id="btn-native-apply" disabled>Import missing sessions</button>
+          </div>
+          <p class="native-warning">Safety: Imports never overwrite existing UUIDs. Close Antigravity before applying. A timestamped target-index backup is made automatically.</p>
+          <pre class="native-report" id="native-report" aria-live="polite">No native migration started.</pre>
+        </div>
       </div>
 
       <div class="run-row">
